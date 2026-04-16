@@ -38,7 +38,7 @@ load_dotenv()
 P = ParamSpec("P")
 T = TypeVar("T")
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 LOG_FILE = os.getenv("LOG_FILE", "")
 ALLOWED_DATA_DIR = (PROJECT_ROOT / os.getenv("ALLOWED_DATA_DIR", "data")).resolve()

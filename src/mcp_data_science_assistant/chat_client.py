@@ -14,7 +14,7 @@ from mcp.client.stdio import stdio_client
 
 load_dotenv()
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SERVER_PATH = PROJECT_ROOT / "src" / "mcp_data_science_assistant" / "server.py"
 MAX_RETRIES = 2
 
