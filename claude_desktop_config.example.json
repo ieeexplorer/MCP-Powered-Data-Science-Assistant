@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "mcp-data-science-assistant": {
+      "command": "python",
+      "args": [
+        "C:/path/to/mcp-powered-data-science-assistant/src/mcp_data_science_assistant/server.py"
+      ]
+    }
+  }
+}
