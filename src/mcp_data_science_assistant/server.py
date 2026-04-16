@@ -2,12 +2,17 @@ from __future__ import annotations
 
 import io
 import logging
+import logging.handlers
 import os
 import sys
+from functools import wraps
 from pathlib import Path
-from typing import Any
+from typing import Any, Awaitable, Callable, ParamSpec, TypeVar, TypedDict
 
 import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt  # noqa: E402
 import pandas as pd
 import requests
 from dotenv import load_dotenv
@@ -28,51 +33,190 @@ from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder
 
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt  # noqa: E402
-
 load_dotenv()
 
-logging.basicConfig(
-    level=logging.INFO,
-    stream=sys.stderr,
-    format="%(asctime)s | %(levelname)s | %(message)s",
-)
+P = ParamSpec("P")
+T = TypeVar("T")
+
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+LOG_FILE = os.getenv("LOG_FILE", "")
+ALLOWED_DATA_DIR = (PROJECT_ROOT / os.getenv("ALLOWED_DATA_DIR", "data")).resolve()
+OUTPUT_DIR = (PROJECT_ROOT / os.getenv("OUTPUT_DIR", "outputs/generated_plots")).resolve()
+MAX_CSV_SIZE_MB = int(os.getenv("MAX_CSV_SIZE_MB", "50"))
+MAX_CSV_SIZE_BYTES = MAX_CSV_SIZE_MB * 1024 * 1024
+
+ALLOWED_DATA_DIR.mkdir(parents=True, exist_ok=True)
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+logger = logging.getLogger("mcp-data-science-assistant")
+logger.setLevel(LOG_LEVEL)
+logger.handlers.clear()
+logger.propagate = False
+
+stderr_handler = logging.StreamHandler(sys.stderr)
+stderr_handler.setFormatter(logging.Formatter("%(asctime)s | %(levelname)s | %(message)s"))
+logger.addHandler(stderr_handler)
+
+if LOG_FILE:
+    resolved_log_file = Path(LOG_FILE)
+    if not resolved_log_file.is_absolute():
+        resolved_log_file = (PROJECT_ROOT / resolved_log_file).resolve()
+    resolved_log_file.parent.mkdir(parents=True, exist_ok=True)
+    file_handler = logging.handlers.RotatingFileHandler(
+        resolved_log_file,
+        maxBytes=10 * 1024 * 1024,
+        backupCount=5,
+        encoding="utf-8",
+    )
+    file_handler.setFormatter(
+        logging.Formatter("%(asctime)s | %(levelname)s | %(name)s | %(message)s")
+    )
+    logger.addHandler(file_handler)
+
+
+class MCPServerError(Exception):
+    """Base exception for MCP tool failures."""
+
+
+class FileAccessError(MCPServerError):
+    """Raised when a file is outside the allowed directory or exceeds size limits."""
+
+
+class DataProcessingError(MCPServerError):
+    """Raised when loading or preparing a dataset fails."""
+
+
+class ModelTrainingError(MCPServerError):
+    """Raised when the model pipeline fails to train or evaluate."""
+
+
+class ErrorResponse(TypedDict):
+    error: str
+    error_type: str
+
+
+class LoadCSVOutput(TypedDict):
+    resolved_path: str
+    shape: dict[str, int]
+    columns: list[str]
+    dtypes: dict[str, str]
+    missing_values: dict[str, int]
+    duplicate_rows: int
+    preview: list[dict[str, Any]]
+    numeric_summary: dict[str, dict[str, float]]
+
+
+class FeatureImportance(TypedDict):
+    feature: str
+    importance: float
+
+
+class TrainRFOutput(TypedDict):
+    resolved_path: str
+    task: str
+    target: str
+    rows_used: int
+    train_rows: int
+    test_rows: int
+    features_used: list[str]
+    metrics: dict[str, float]
+    top_feature_importances: list[FeatureImportance]
+
+
+def _error_response(error: Exception | str, error_type: str) -> ErrorResponse:
+    message = str(error) if isinstance(error, Exception) else error
+    return {"error": message, "error_type": error_type}
+
+
+def handle_tool_errors(
+    func: Callable[P, Awaitable[T]],
+) -> Callable[P, Awaitable[T | ErrorResponse]]:
+    """Return structured tool errors instead of bubbling raw exceptions to the host."""
+
+    @wraps(func)
+    async def wrapper(*args: P.args, **kwargs: P.kwargs) -> T | ErrorResponse:
+        try:
+            return await func(*args, **kwargs)
+        except MCPServerError as error:
+            logger.error("Tool error in %s: %s", func.__name__, error)
+            return _error_response(error, error.__class__.__name__)
+        except Exception as error:
+            logger.exception("Unexpected error in %s", func.__name__)
+            return _error_response(f"Unexpected error: {error}", "InternalError")
+
+    return wrapper
+
 
 mcp = FastMCP(
-    name="MCP-Powered Data Science Assistant",
+    name=os.getenv("MCP_SERVER_NAME", "MCP-Powered Data Science Assistant"),
     instructions=(
         "Use the available tools to inspect datasets, create charts, train baseline machine "
-        "learning models, scrape public Wikipedia tables, and call Gemini for reasoning-heavy tasks."
+        "learning models, scrape public Wikipedia tables, and call Gemini for reasoning-heavy tasks. "
+        "Dataset file access is restricted to the configured data directory."
     ),
 )
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
-OUTPUT_DIR = PROJECT_ROOT / "outputs" / "generated_plots"
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-
-def _resolve_path(file_path: str) -> Path:
+def _resolve_and_validate_path(file_path: str) -> Path:
     path = Path(file_path).expanduser()
     if not path.is_absolute():
         path = (PROJECT_ROOT / path).resolve()
+    else:
+        path = path.resolve()
+
+    try:
+        path.relative_to(ALLOWED_DATA_DIR)
+    except ValueError as error:
+        raise FileAccessError(
+            f"Access denied: '{path}' is outside allowed data directory '{ALLOWED_DATA_DIR}'."
+        ) from error
+
+    if not path.exists():
+        raise FileAccessError(f"File not found: {path}")
+    if path.stat().st_size > MAX_CSV_SIZE_BYTES:
+        raise FileAccessError(
+            f"File size ({path.stat().st_size / 1024 / 1024:.1f} MB) exceeds limit ({MAX_CSV_SIZE_MB} MB)."
+        )
     return path
 
 
 def _load_dataframe(file_path: str) -> pd.DataFrame:
-    path = _resolve_path(file_path)
-    if not path.exists():
-        raise FileNotFoundError(f"File not found: {path}")
+    path = _resolve_and_validate_path(file_path)
     if path.suffix.lower() not in {".csv", ".tsv"}:
-        raise ValueError("Only .csv and .tsv files are supported by this demo server.")
+        raise DataProcessingError("Only .csv and .tsv files are supported by this demo server.")
     separator = "\t" if path.suffix.lower() == ".tsv" else ","
-    return pd.read_csv(path, sep=separator)
+    try:
+        return pd.read_csv(path, sep=separator)
+    except Exception as error:
+        raise DataProcessingError(f"Failed to read file: {error}") from error
 
 
 def _infer_task(y: pd.Series) -> str:
     if pd.api.types.is_numeric_dtype(y) and y.nunique(dropna=True) > 10:
         return "regression"
     return "classification"
+
+
+def _simplify_feature_names(names: list[str]) -> list[str]:
+    simplified: list[str] = []
+    for name in names:
+        if name.startswith("num__"):
+            simplified.append(name.removeprefix("num__"))
+            continue
+        if name.startswith("cat__"):
+            remainder = name.removeprefix("cat__")
+            if "_" in remainder:
+                column, encoded_value = remainder.split("_", 1)
+                simplified.append(f"{column} = {encoded_value}")
+            else:
+                simplified.append(remainder)
+            continue
+        if "__" in name:
+            simplified.append(name.split("__", 1)[1])
+            continue
+        simplified.append(name)
+    return simplified
 
 
 def _feature_names(preprocessor: ColumnTransformer) -> list[str]:
@@ -89,7 +233,7 @@ def _feature_names(preprocessor: ColumnTransformer) -> list[str]:
             names.extend([str(item) for item in generated])
         else:
             names.extend([str(column) for column in columns])
-    return names
+    return _simplify_feature_names(names)
 
 
 @mcp.resource("guide://capabilities")
@@ -101,6 +245,7 @@ MCP-Powered Data Science Assistant
 Main tools:
 1. load_csv(file_path)
    - Returns shape, columns, dtypes, missing values, duplicates, and summary statistics.
+   - Only reads files from the configured data directory.
 
 2. plot_histogram(file_path, column, bins)
    - Returns a PNG chart for a numeric column.
@@ -122,6 +267,9 @@ Best practice:
 - Inspect the target column
 - Train a model
 - Then ask the LLM to explain the results in plain English
+
+Error handling:
+- Tool failures return a structured payload with error and error_type fields.
 """.strip()
 
 
@@ -141,14 +289,16 @@ Suggested tool sequence:
 
 
 @mcp.tool()
-async def load_csv(file_path: str, ctx: Context | None = None) -> dict[str, Any]:
-    """Load a CSV/TSV file and return a dataset health summary."""
+@handle_tool_errors
+async def load_csv(file_path: str, ctx: Context | None = None) -> LoadCSVOutput:
+    """Load a CSV/TSV file from the allowed data directory and return a dataset health summary."""
     if ctx:
         await ctx.info(f"Loading dataset: {file_path}")
+    logger.info("Tool called: load_csv('%s')", file_path)
     df = _load_dataframe(file_path)
 
-    summary = {
-        "resolved_path": str(_resolve_path(file_path)),
+    summary: LoadCSVOutput = {
+        "resolved_path": str(_resolve_and_validate_path(file_path)),
         "shape": {"rows": int(df.shape[0]), "columns": int(df.shape[1])},
         "columns": list(df.columns),
         "dtypes": {column: str(dtype) for column, dtype in df.dtypes.items()},
@@ -161,6 +311,7 @@ async def load_csv(file_path: str, ctx: Context | None = None) -> dict[str, Any]
 
 
 @mcp.tool()
+@handle_tool_errors
 async def plot_histogram(
     file_path: str,
     column: str,
@@ -170,12 +321,13 @@ async def plot_histogram(
     """Create a histogram for a numeric column and return it as an MCP image."""
     if ctx:
         await ctx.info(f"Creating histogram for {column} from {file_path}")
+    logger.info("Tool called: plot_histogram('%s', '%s', bins=%s)", file_path, column, bins)
     df = _load_dataframe(file_path)
 
     if column not in df.columns:
-        raise ValueError(f"Column '{column}' not found.")
+        raise DataProcessingError(f"Column '{column}' not found.")
     if not pd.api.types.is_numeric_dtype(df[column]):
-        raise ValueError(f"Column '{column}' is not numeric.")
+        raise DataProcessingError(f"Column '{column}' is not numeric.")
 
     fig, ax = plt.subplots(figsize=(8, 5))
     df[column].dropna().plot(kind="hist", bins=bins, ax=ax)
@@ -192,10 +344,12 @@ async def plot_histogram(
 
     if ctx:
         await ctx.info(f"Histogram saved to {path}")
+    logger.info("Histogram saved to %s", path)
     return Image(data=image_bytes.getvalue(), format="png")
 
 
 @mcp.tool()
+@handle_tool_errors
 async def train_random_forest(
     file_path: str,
     target: str,
@@ -203,20 +357,26 @@ async def train_random_forest(
     test_size: float = 0.2,
     random_state: int = 42,
     ctx: Context | None = None,
-) -> dict[str, Any]:
+) -> TrainRFOutput:
     """Train a baseline Random Forest and return evaluation metrics plus feature importances."""
     if ctx:
         await ctx.info(f"Training random forest for target '{target}' from {file_path}")
+    logger.info(
+        "Tool called: train_random_forest('%s', target='%s', features=%s)",
+        file_path,
+        target,
+        features,
+    )
     df = _load_dataframe(file_path)
 
     if target not in df.columns:
-        raise ValueError(f"Target column '{target}' not found.")
+        raise DataProcessingError(f"Target column '{target}' not found.")
 
     working_df = df.copy()
     if features:
         missing_features = [feature for feature in features if feature not in working_df.columns]
         if missing_features:
-            raise ValueError(f"Features not found: {missing_features}")
+            raise DataProcessingError(f"Features not found: {missing_features}")
         columns_to_keep = list(dict.fromkeys(features + [target]))
         working_df = working_df[columns_to_keep]
 
@@ -225,7 +385,7 @@ async def train_random_forest(
     y = working_df[target]
 
     if X.empty:
-        raise ValueError("No feature columns remain after preprocessing.")
+        raise DataProcessingError("No feature columns remain after preprocessing.")
 
     numeric_features = X.select_dtypes(include=["number"]).columns.tolist()
     categorical_features = [column for column in X.columns if column not in numeric_features]
@@ -278,15 +438,18 @@ async def train_random_forest(
             ("model", model),
         ]
     )
-    pipeline.fit(X_train, y_train)
-    predictions = pipeline.predict(X_test)
+    try:
+        pipeline.fit(X_train, y_train)
+        predictions = pipeline.predict(X_test)
+    except Exception as error:
+        raise ModelTrainingError(f"Failed to train model: {error}") from error
 
     fitted_preprocessor: ColumnTransformer = pipeline.named_steps["preprocessor"]
     fitted_model = pipeline.named_steps["model"]
     transformed_feature_names = _feature_names(fitted_preprocessor)
 
     importances = getattr(fitted_model, "feature_importances_", [])
-    importance_pairs = [
+    importance_pairs: list[FeatureImportance] = [
         {"feature": name, "importance": round(float(score), 6)}
         for name, score in sorted(
             zip(transformed_feature_names, importances),
@@ -309,8 +472,8 @@ async def train_random_forest(
             "rmse": round(float(root_mean_squared_error(y_test, predictions)), 4),
         }
 
-    return {
-        "resolved_path": str(_resolve_path(file_path)),
+    output: TrainRFOutput = {
+        "resolved_path": str(_resolve_and_validate_path(file_path)),
         "task": task,
         "target": target,
         "rows_used": int(working_df.shape[0]),
@@ -320,9 +483,12 @@ async def train_random_forest(
         "metrics": metrics,
         "top_feature_importances": importance_pairs,
     }
+    logger.info("Model training completed. Task: %s, Metrics: %s", task, metrics)
+    return output
 
 
 @mcp.tool()
+@handle_tool_errors
 async def scrape_table_from_wikipedia(
     url: str,
     table_index: int = 0,
@@ -331,14 +497,15 @@ async def scrape_table_from_wikipedia(
 ) -> dict[str, Any]:
     """Scrape a public Wikipedia table and return structured rows."""
     if "wikipedia.org" not in url:
-        raise ValueError("For safety, this demo only supports wikipedia.org URLs.")
+        raise MCPServerError("For safety, this demo only supports wikipedia.org URLs.")
 
     if ctx:
         await ctx.info(f"Scraping Wikipedia table {table_index} from {url}")
+    logger.info("Tool called: scrape_table_from_wikipedia('%s', table_index=%s)", url, table_index)
 
     tables = pd.read_html(url)
     if table_index < 0 or table_index >= len(tables):
-        raise ValueError(f"table_index must be between 0 and {len(tables) - 1}")
+        raise MCPServerError(f"table_index must be between 0 and {len(tables) - 1}")
 
     table = tables[table_index]
     table.columns = [str(column) for column in table.columns]
@@ -355,6 +522,7 @@ async def scrape_table_from_wikipedia(
 
 
 @mcp.tool()
+@handle_tool_errors
 async def fetch_web_json(
     url: str,
     timeout_seconds: int = 20,
@@ -363,6 +531,7 @@ async def fetch_web_json(
     """Fetch JSON from a public API endpoint."""
     if ctx:
         await ctx.info(f"Fetching JSON from {url}")
+    logger.info("Tool called: fetch_web_json('%s')", url)
 
     response = requests.get(url, timeout=timeout_seconds, headers={"User-Agent": "mcp-ds-assistant/0.1"})
     response.raise_for_status()
@@ -387,6 +556,7 @@ async def fetch_web_json(
 
 
 @mcp.tool()
+@handle_tool_errors
 async def query_google_gemini(
     prompt: str,
     model: str | None = None,
@@ -395,10 +565,11 @@ async def query_google_gemini(
     """Call Gemini using the official Google GenAI SDK."""
     if ctx:
         await ctx.info("Calling Gemini")
+    logger.info("Tool called: query_google_gemini")
 
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
-        raise ValueError("GEMINI_API_KEY is missing. Add it to your .env file first.")
+        raise MCPServerError("GEMINI_API_KEY is missing. Add it to your .env file first.")
 
     chosen_model = model or os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
@@ -418,6 +589,7 @@ async def query_google_gemini(
 
 def main() -> None:
     """Run the MCP server over STDIO by default."""
+    logger.info("Starting MCP Data Science Assistant server...")
     mcp.run()
 
 

@@ -11,6 +11,15 @@ requires-python = ">=3.11"
 authors = [
   { name = "Farshad" }
 ]
+license = { text = "MIT" }
+keywords = ["mcp", "llm", "data-science", "machine-learning", "claude"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+]
 dependencies = [
   "mcp>=1.17.0",
   "pandas>=2.2.0",
@@ -25,6 +34,15 @@ dependencies = [
   "anthropic>=0.40.0",
 ]
 
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0.0",
+  "pytest-asyncio>=0.23.0",
+  "mypy>=1.0.0",
+  "black>=24.0.0",
+  "ruff>=0.1.0",
+]
+
 [project.scripts]
 mcp-ds-server = "mcp_data_science_assistant.server:main"
 mcp-ds-chat = "mcp_data_science_assistant.chat_client:main"
@@ -34,3 +52,9 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.black]
+line-length = 100
+
+[tool.ruff]
+line-length = 100

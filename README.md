@@ -1,301 +1,135 @@
 # MCP-Powered Data Science Assistant
 
-A portfolio-ready project that turns an LLM into a **conversational data analyst** using an **MCP server**.
+A production-ready MCP server that turns an LLM into a conversational data analyst.
 
-Instead of building isolated notebooks or one-off scripts, this project packages real data tasks as MCP tools:
+This version adds stronger security boundaries, structured error handling, configurable logging, cleaner ML output, and a more resilient terminal client while keeping the original tool set intact.
 
-- load a dataset
-- inspect quality issues
-- generate a chart
-- train a baseline ML model
-- scrape a public table
-- call Gemini for extra reasoning
+## What changed
 
-That means a host like **Claude Desktop** can use your tools step by step and answer questions such as:
-
-> “Analyze the churn dataset and tell me which feature matters most.”
-
----
-
-## Why this project is strong for your profile
-
-This project combines:
-- **MCP server engineering**
-- **Python data science**
-- **baseline machine learning**
-- **API/web data ingestion**
-- **LLM tooling**
-- **clean, modular architecture**
-
-It shows that you can move from:
-- single scripts  
-to
-- a reusable AI-tooling system
-
----
-
-## Architecture
-
-```text
-User
-  │
-  ▼
-Claude Desktop or Custom Terminal Client
-  │
-  ▼
-MCP Server
-  ├── load_csv(file_path)
-  ├── plot_histogram(file_path, column, bins)
-  ├── train_random_forest(file_path, target, features)
-  ├── scrape_table_from_wikipedia(url, table_index)
-  ├── fetch_web_json(url)
-  └── query_google_gemini(prompt)
-```
-
----
-
-## Project structure
-
-```text
-mcp-powered-data-science-assistant/
-├── src/
-│   └── mcp_data_science_assistant/
-│       ├── __init__.py
-│       ├── server.py
-│       └── chat_client.py
-├── data/
-│   └── churn_sample.csv
-├── docs/
-│   └── architecture.md
-├── examples/
-│   └── demo_queries.md
-├── outputs/
-├── .env.example
-├── .gitignore
-├── claude_desktop_config.example.json
-├── pyproject.toml
-├── requirements.txt
-└── README.md
-```
-
----
+- File access is restricted to a configured data directory.
+- CSV and TSV loading now enforces a maximum file size.
+- Tool failures return structured error payloads instead of raw exceptions.
+- Logging still goes to stderr for MCP compatibility and can also rotate to a file.
+- Feature importance labels are easier to read after one-hot encoding.
+- The terminal client retries Anthropic rate-limit and transient connection failures.
 
 ## Main tools
 
-### 1) `load_csv(file_path)`
-Returns:
-- row/column count
-- column names
-- data types
-- missing values
-- duplicate count
-- preview rows
-- numeric summary
-
-### 2) `plot_histogram(file_path, column, bins=20)`
-Creates a histogram for a numeric column and returns an image to the MCP host.
-
-### 3) `train_random_forest(file_path, target, features=None)`
-Builds a baseline Random Forest pipeline with:
-- missing-value handling
-- one-hot encoding for categorical fields
-- train/test split
-- feature importances
-- model metrics
-
-It auto-detects:
-- **classification** for label-like targets
-- **regression** for continuous numeric targets
-
-### 4) `scrape_table_from_wikipedia(url, table_index=0)`
-Uses `pandas.read_html()` to extract a public table from Wikipedia and return structured records.
-
-### 5) `fetch_web_json(url)`
-Fetches JSON from a public API endpoint and returns a clean preview.
-
-### 6) `query_google_gemini(prompt, model=None)`
-Uses the **official Google GenAI SDK** if `GEMINI_API_KEY` is present.
-
----
+1. `load_csv(file_path)`
+   Returns row and column counts, schema, missing values, duplicates, preview rows, and numeric summary stats.
+2. `plot_histogram(file_path, column, bins=20)`
+   Creates a histogram for a numeric column and returns it as an MCP image.
+3. `train_random_forest(file_path, target, features=None)`
+   Trains a baseline Random Forest pipeline with preprocessing, train/test split, metrics, and readable feature importances.
+4. `scrape_table_from_wikipedia(url, table_index=0)`
+   Extracts structured rows from a public Wikipedia table.
+5. `fetch_web_json(url)`
+   Fetches and previews JSON from a public endpoint.
+6. `query_google_gemini(prompt, model=None)`
+   Calls Gemini through the official Google GenAI SDK.
 
 ## Quick start
 
-## 1. Create a virtual environment
+### 1. Create a virtual environment
 
-### Windows PowerShell
+Windows PowerShell:
+
 ```powershell
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 ```
 
-### macOS / Linux
+macOS / Linux:
+
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
----
+### 2. Configure environment variables
 
-## 2. Add environment variables
+Copy `.env.example` to `.env` and set your API keys and any optional server settings.
 
-Create a `.env` file from `.env.example`.
+Important defaults:
 
-Example:
+| Variable | Description | Default |
+|---|---|---|
+| `MCP_SERVER_NAME` | Display name exposed to MCP hosts | `MCP-Powered Data Science Assistant` |
+| `ALLOWED_DATA_DIR` | Directory allowed for CSV/TSV reads | `data` |
+| `OUTPUT_DIR` | Directory for generated plots | `outputs/generated_plots` |
+| `MAX_CSV_SIZE_MB` | Maximum dataset size in megabytes | `50` |
+| `LOG_LEVEL` | Logging verbosity | `INFO` |
+| `LOG_FILE` | Optional rotating log file path | empty |
 
-```env
-GEMINI_API_KEY=your-gemini-api-key
-GEMINI_MODEL=gemini-2.5-flash
-ANTHROPIC_API_KEY=your-anthropic-api-key
-ANTHROPIC_MODEL=claude-sonnet-4-20250514
+### 3. Place datasets under the allowed directory
+
+By default, datasets must live under `data/`. For example:
+
+```text
+data/churn_sample.csv
 ```
 
----
-
-## 3. Run the MCP server
+### 4. Run the MCP server
 
 ```bash
 python src/mcp_data_science_assistant/server.py
 ```
 
----
+### 5. Connect Claude Desktop
 
-## 4. Connect Claude Desktop
+Use [claude_desktop_config.example.json](claude_desktop_config.example.json) as a template and point it at your local `server.py` path, then restart Claude Desktop.
 
-Open your Claude Desktop MCP config and add something like:
-
-```json
-{
-  "mcpServers": {
-    "mcp-data-science-assistant": {
-      "command": "python",
-      "args": [
-        "C:/path/to/mcp-powered-data-science-assistant/src/mcp_data_science_assistant/server.py"
-      ]
-    }
-  }
-}
-```
-
-Then fully restart Claude Desktop.
-
----
-
-## 5. Optional: run the custom terminal chat client
+### 6. Optional: run the terminal chat client
 
 ```bash
 python src/mcp_data_science_assistant/chat_client.py
 ```
 
-Then try:
+Example prompt:
 
 ```text
 Analyze data/churn_sample.csv and tell me which feature matters most for churn.
 ```
 
----
+## Security model
+
+- Tool-based file reads are limited to `ALLOWED_DATA_DIR`.
+- Directory traversal outside that directory is rejected.
+- Only `.csv` and `.tsv` files are accepted.
+- Oversized datasets are rejected using `MAX_CSV_SIZE_MB`.
+- Wikipedia scraping stays limited to `wikipedia.org` URLs in this demo.
+
+## Error handling
+
+Tool failures return a simple structured response:
+
+```json
+{
+  "error": "human-readable message",
+  "error_type": "SpecificErrorClass"
+}
+```
+
+That gives MCP hosts and the included terminal client a stable contract for reporting failures without crashing the full interaction.
 
 ## Example workflow
 
-### User
-Analyze `data/churn_sample.csv` and tell me which feature matters most.
+1. Call `load_csv("data/churn_sample.csv")`.
+2. Inspect missing values and candidate features.
+3. Call `train_random_forest(file_path="data/churn_sample.csv", target="Churn")`.
+4. Read `top_feature_importances` such as `Contract = Month-to-month`.
+5. Summarize the findings in plain English.
 
-### LLM host
-1. calls `load_csv("data/churn_sample.csv")`
-2. calls `train_random_forest(file_path="data/churn_sample.csv", target="Churn")`
-3. reads `top_feature_importances`
-4. answers in plain English
+## Development notes
 
----
+- `requirements.txt` is pinned for reproducible installs.
+- `pyproject.toml` keeps runtime dependencies loose and adds optional dev extras.
+- The matplotlib `Agg` backend is configured before importing pyplot for headless environments.
 
-## Simple explanation of the ML part
+## Future work
 
-Think of the model as a smart pattern finder.
-
-It learns from old examples:
-- customers who stayed
-- customers who left
-
-Then it checks which columns helped the most in separating those two groups.
-
-Typical important features in churn-style datasets are things like:
-- tenure
-- monthly charges
-- contract type
-- total charges
-
----
-
-## Good interview talking points
-
-### What problem does it solve?
-It lets an LLM perform real data tasks through controlled tools instead of hallucinating from raw chat alone.
-
-### Why MCP?
-Because it makes your tools reusable across multiple hosts instead of locking them into one notebook or one UI.
-
-### Why Random Forest first?
-Because it is strong as a baseline, easy to explain, and gives feature importance out of the box.
-
-### Why this is better than a notebook-only project?
-Because it separates:
-- conversation layer
-- tool execution layer
-- data/ML logic
-
-That is closer to production design.
-
----
-
-## Best CV bullets
-
-- Built an **MCP-based data science assistant** in Python that exposed dataset inspection, plotting, ML training, web scraping, and Gemini reasoning as reusable tools for LLM hosts.
-- Developed a **FastMCP / MCP Python SDK server** that enabled Claude Desktop or a custom chat client to execute structured analytics workflows over CSV data.
-- Implemented a **Random Forest ML pipeline** with preprocessing, missing-value handling, one-hot encoding, model evaluation, and feature importance reporting for conversational analysis.
-- Added **web-data capabilities** using API ingestion and Wikipedia table extraction, extending the assistant beyond local files into public structured data sources.
-- Designed the project using a **modular architecture** separating MCP tools, ML logic, host integration, and environment-based secret management.
-
----
-
-## Tips and tricks
-
-| Situation | Best move |
-|---|---|
-| You want the host to “understand the data first” | Always call `load_csv()` before training |
-| Column contains words like Yes/No | Treat it as classification |
-| Target is continuous numeric | Use regression |
-| Chart request fails | Check if the column is numeric |
-| Bad model performance | Start by checking missing values, leakage, and class imbalance |
-| Wikipedia extraction breaks | Try a different `table_index` |
-| Gemini tool fails | Check `GEMINI_API_KEY` in `.env` |
-
----
-
-## Easy demo prompts
-
-- Analyze `data/churn_sample.csv` and summarize the dataset health.
-- Train a model on `data/churn_sample.csv` with `Churn` as the target.
-- Plot a histogram of `MonthlyCharges`.
-- Scrape the first table from a Wikipedia page and summarize the rows.
-- Ask Gemini to explain model metrics like accuracy, precision, recall, and F1 in plain English.
-
----
-
-## Future upgrades
-
-- SHAP explanations
-- correlation heatmaps
-- SQL database connectors
-- anomaly detection tools
-- forecast tools
-- Streamlit dashboard
-- remote MCP transport over Streamable HTTP
-- authentication and access control
-- test suite and CI pipeline
-
----
-
-## One-sentence pitch
-
-**MCP-Powered Data Science Assistant** is a Python project that turns an LLM into a safe, tool-using data analyst by exposing structured analytics and ML capabilities through the Model Context Protocol.
+- Add a small pytest suite for core helpers and security checks.
+- Add richer model explainability such as SHAP or partial dependence plots.
+- Add more transports, auth, and integration testing as the project grows.
