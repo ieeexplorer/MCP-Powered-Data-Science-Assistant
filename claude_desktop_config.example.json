@@ -1,10 +1,14 @@
 {
   "mcpServers": {
     "mcp-data-science-assistant": {
-      "command": "python",
+      "command": "C:\\Users\\YOUR_USERNAME\\Downloads\\mcp-powered-data-science-assistant\\.venv\\Scripts\\python.exe",
       "args": [
-        "C:\\Users\\YOUR_USERNAME\\Downloads\\mcp-powered-data-science-assistant\\src\\mcp_data_science_assistant\\server.py"
-      ]
+        "-m",
+        "mcp_data_science_assistant.server"
+      ],
+      "env": {
+        "MCP_PROJECT_ROOT": "C:\\Users\\YOUR_USERNAME\\Downloads\\mcp-powered-data-science-assistant"
+      }
     }
   }
 }
