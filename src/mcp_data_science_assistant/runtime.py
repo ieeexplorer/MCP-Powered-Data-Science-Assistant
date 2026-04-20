@@ -39,5 +39,22 @@ def resolve_workspace_path(path_value: str) -> Path:
     return (get_workspace_root() / path).resolve()
 
 
+def _package_is_importable() -> bool:
+    """Return True when mcp_data_science_assistant is on sys.path and importable."""
+    import importlib.util
+    return importlib.util.find_spec(PACKAGE_NAME) is not None
+
+
 def build_server_command() -> tuple[str, list[str]]:
-    return sys.executable, ["-m", "mcp_data_science_assistant.server"]
+    """Return the command and args needed to launch the MCP server.
+
+    Prefers the module entrypoint when the package is installed/importable.
+    Falls back to a direct script path for source-checkout usage without an
+    editable install, so the chat client can still connect.
+    """
+    if _package_is_importable():
+        return sys.executable, ["-m", f"{PACKAGE_NAME}.server"]
+
+    # Package not importable — launch the server script directly by path.
+    server_script = Path(__file__).resolve().parent / "server.py"
+    return sys.executable, [str(server_script)]
