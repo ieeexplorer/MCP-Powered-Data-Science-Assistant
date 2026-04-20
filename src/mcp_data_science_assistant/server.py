@@ -1,3 +1,5 @@
+"""MCP server exposing dataset analysis, plotting, and helper tools."""
+
 from __future__ import annotations
 
 import io
@@ -33,16 +35,21 @@ from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder
 
+try:
+    from mcp_data_science_assistant.runtime import get_workspace_root, resolve_workspace_path
+except ModuleNotFoundError:
+    from runtime import get_workspace_root, resolve_workspace_path
+
 load_dotenv()
 
 P = ParamSpec("P")
 T = TypeVar("T")
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = get_workspace_root()
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 LOG_FILE = os.getenv("LOG_FILE", "")
-ALLOWED_DATA_DIR = (PROJECT_ROOT / os.getenv("ALLOWED_DATA_DIR", "data")).resolve()
-OUTPUT_DIR = (PROJECT_ROOT / os.getenv("OUTPUT_DIR", "outputs/generated_plots")).resolve()
+ALLOWED_DATA_DIR = resolve_workspace_path(os.getenv("ALLOWED_DATA_DIR", "data"))
+OUTPUT_DIR = resolve_workspace_path(os.getenv("OUTPUT_DIR", "outputs/generated_plots"))
 MAX_CSV_SIZE_MB = int(os.getenv("MAX_CSV_SIZE_MB", "50"))
 MAX_CSV_SIZE_BYTES = MAX_CSV_SIZE_MB * 1024 * 1024
 
@@ -59,9 +66,7 @@ stderr_handler.setFormatter(logging.Formatter("%(asctime)s | %(levelname)s | %(m
 logger.addHandler(stderr_handler)
 
 if LOG_FILE:
-    resolved_log_file = Path(LOG_FILE)
-    if not resolved_log_file.is_absolute():
-        resolved_log_file = (PROJECT_ROOT / resolved_log_file).resolve()
+    resolved_log_file = resolve_workspace_path(LOG_FILE)
     resolved_log_file.parent.mkdir(parents=True, exist_ok=True)
     file_handler = logging.handlers.RotatingFileHandler(
         resolved_log_file,
@@ -159,11 +164,7 @@ mcp = FastMCP(
 
 
 def _resolve_and_validate_path(file_path: str) -> Path:
-    path = Path(file_path).expanduser()
-    if not path.is_absolute():
-        path = (PROJECT_ROOT / path).resolve()
-    else:
-        path = path.resolve()
+    path = resolve_workspace_path(file_path)
 
     try:
         path.relative_to(ALLOWED_DATA_DIR)

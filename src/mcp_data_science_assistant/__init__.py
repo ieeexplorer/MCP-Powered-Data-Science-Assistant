@@ -1,1 +1,5 @@
-__all__ = ["server", "chat_client"]
+"""MCP-powered data science assistant package."""
+
+__version__ = "0.1.0"
+
+__all__ = ["__version__"]

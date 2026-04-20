@@ -1,13 +1,22 @@
 # Demo Queries
 
-## Dataset analysis
+## Dataset exploration
+
+- Load `data/churn_sample.csv` and summarize the schema, missing values, and duplicate rows.
 - Analyze `data/churn_sample.csv` and tell me which features matter most for churn.
-- Load `data/churn_sample.csv` and summarize the missing values and duplicates.
-- Plot a histogram of `MonthlyCharges` from `data/churn_sample.csv`.
+- Plot a histogram of `MonthlyCharges` from `data/churn_sample.csv` and explain the distribution.
 
-## Web + data
-- Scrape the first table from the Wikipedia page on machine learning and summarize it.
-- Fetch JSON from a public API and explain the payload shape.
+## Baseline modeling
 
-## Gemini helper
-- Ask Gemini to explain the model metrics from the churn experiment in plain English.
+- Train a baseline model on `data/churn_sample.csv` using `Churn` as the target and summarize the metrics.
+- Compare the top feature importances from the churn model and suggest two retention actions.
+
+## Web and public data
+
+- Scrape the first table from the Wikipedia page on machine learning and summarize the main categories.
+- Fetch JSON from a public API and explain the payload shape before suggesting useful fields to visualize.
+
+## Gemini follow-up
+
+- Ask Gemini to explain the churn model metrics in plain English for a non-technical stakeholder.
+- Ask Gemini to turn the churn analysis into a short executive summary with recommended next steps.

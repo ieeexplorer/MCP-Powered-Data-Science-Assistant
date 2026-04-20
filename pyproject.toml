@@ -19,6 +19,7 @@ classifiers = [
   "License :: OSI Approved :: MIT License",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
   "mcp>=1.17.0",
@@ -47,6 +48,11 @@ dev = [
 mcp-ds-server = "mcp_data_science_assistant.server:main"
 mcp-ds-chat = "mcp_data_science_assistant.chat_client:main"
 
+[project.urls]
+Homepage = "https://github.com/ieeexplorer/MCP-Powered-Data-Science-Assistant"
+Repository = "https://github.com/ieeexplorer/MCP-Powered-Data-Science-Assistant"
+Documentation = "https://github.com/ieeexplorer/MCP-Powered-Data-Science-Assistant/blob/main/docs/architecture.md"
+
 [tool.setuptools]
 package-dir = {"" = "src"}
 
@@ -58,3 +64,7 @@ line-length = 100
 
 [tool.ruff]
 line-length = 100
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

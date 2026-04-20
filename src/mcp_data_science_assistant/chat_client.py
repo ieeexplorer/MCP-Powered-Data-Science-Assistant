@@ -1,3 +1,5 @@
+"""Terminal client for chatting with the MCP data science server."""
+
 from __future__ import annotations
 
 import asyncio
@@ -12,10 +14,13 @@ from dotenv import load_dotenv
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
+try:
+    from mcp_data_science_assistant.runtime import build_server_command
+except ModuleNotFoundError:
+    from runtime import build_server_command
+
 load_dotenv()
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-SERVER_PATH = PROJECT_ROOT / "src" / "mcp_data_science_assistant" / "server.py"
 MAX_RETRIES = 2
 
 
@@ -32,9 +37,10 @@ class MCPDataScienceChatClient:
         self.model = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
 
     async def connect(self) -> None:
+        server_command, server_args = build_server_command()
         server_params = StdioServerParameters(
-            command="python",
-            args=[str(SERVER_PATH)],
+            command=server_command,
+            args=server_args,
             env=os.environ.copy(),
         )
         stdio_transport = await self.exit_stack.enter_async_context(stdio_client(server_params))
@@ -45,7 +51,8 @@ class MCPDataScienceChatClient:
         tools_response = await self.session.list_tools()
         print("\nConnected to MCP server. Available tools:")
         for tool in tools_response.tools:
-            print(f" - {tool.name}: {tool.description[:60]}...")
+            description = tool.description or "No description provided."
+            print(f" - {tool.name}: {description[:60]}...")
 
     async def _create_response(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> Any:
         for attempt in range(MAX_RETRIES + 1):
